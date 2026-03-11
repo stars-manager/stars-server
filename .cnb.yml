@@ -1,0 +1,20 @@
+# .cnb.yml
+dev:
+  push:
+    - services:
+        - docker
+      stages:
+        - name: docker build
+          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev .
+        - name: docker push
+          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev
+
+main:
+  push:
+    - services:
+        - docker
+      stages:
+        - name: docker build
+          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest .
+        - name: docker push
+          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest

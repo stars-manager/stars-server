@@ -1,0 +1,21 @@
+# .github/workflows/sync-cnb.yml
+
+name: Sync to CNB
+on: [push]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Sync to CNB Repository
+        uses: docker://tencentcom/git-sync
+        env:
+          PLUGIN_TARGET_URL: "https://cnb.cool/rss1102.cnb/github-stars-manage/server.git"
+          PLUGIN_AUTH_TYPE: "https"
+          PLUGIN_USERNAME: "cnb"
+          PLUGIN_PASSWORD: ${{ secrets.SYNC_TO_CNB_TOKEN_STARS }}
+          PLUGIN_FORCE: "true"
