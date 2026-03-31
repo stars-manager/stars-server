@@ -24,6 +24,8 @@ const (
 	MinSessionIDLength = 4                // SessionID最小长度
 	MaxSessionIDLength = 64               // SessionID最大长度
 	SessionTimeout     = 30 * time.Minute // 会话超时时间
+	MaxSessions        = 10000            // 最大会话数量
+	CleanupBatchSize   = 1000             // 清理批次大小
 )
 
 // sessionID格式：字母、数字、连字符、下划线
@@ -122,20 +124,34 @@ func NewSessionManager() *SessionManager {
 // GetSession 获取或创建会话
 func (sm *SessionManager) GetSession(sessionID string) (*Session, bool) {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 
 	session, exists := sm.sessions[sessionID]
 	if !exists {
+		// 检查会话数量是否超过上限
+		if len(sm.sessions) >= MaxSessions {
+			// 清理最早的 CleanupBatchSize 个会话
+			sm.cleanupOldestSessions(CleanupBatchSize)
+		}
+		
 		now := time.Now()
 		session = &Session{
 			Messages:   []openai.ChatCompletionMessage{},
 			LastActive: now,
 		}
 		sm.sessions[sessionID] = session
+		sm.mu.Unlock()
 		return session, false // 返回 false 表示新创建
 	}
 
-	session.LastActive = time.Now()
+	sm.mu.Unlock()
+	
+	// 异步更新最后活跃时间，减少持锁时间
+	go func() {
+		session.mu.Lock()
+		session.LastActive = time.Now()
+		session.mu.Unlock()
+	}()
+	
 	return session, true // 返回 true 表示已存在
 }
 
@@ -157,6 +173,36 @@ func (sm *SessionManager) Exists(sessionID string) bool {
 	defer sm.mu.RUnlock()
 	_, exists := sm.sessions[sessionID]
 	return exists
+}
+
+// cleanupOldestSessions 清理最早的会话
+func (sm *SessionManager) cleanupOldestSessions(count int) {
+	// 收集所有会话的最后活跃时间
+	type sessionInfo struct {
+		id         string
+		lastActive time.Time
+	}
+	
+	sessions := make([]sessionInfo, 0, len(sm.sessions))
+	for id, session := range sm.sessions {
+		session.mu.RLock()
+		sessions = append(sessions, sessionInfo{id: id, lastActive: session.LastActive})
+		session.mu.RUnlock()
+	}
+	
+	// 按最后活跃时间排序（最早的在前）
+	for i := 0; i < len(sessions); i++ {
+		for j := i + 1; j < len(sessions); j++ {
+			if sessions[i].lastActive.After(sessions[j].lastActive) {
+				sessions[i], sessions[j] = sessions[j], sessions[i]
+			}
+		}
+	}
+	
+	// 清理最早的 count 个会话
+	for i := 0; i < count && i < len(sessions); i++ {
+		delete(sm.sessions, sessions[i].id)
+	}
 }
 
 // GetStats 获取会话统计

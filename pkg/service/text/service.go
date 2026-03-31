@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 	"time"
 
@@ -275,11 +274,15 @@ func parseJSONResponse(input string, target any) error {
 	// 清理输入
 	input = strings.TrimSpace(input)
 
-	// 使用正则移除 markdown 代码块
-	// 匹配 ```json ... ``` 或 ``` ... ```
-	re := regexp.MustCompile("(?s)^```(?:json)?\\s*\n?(.*?)\n?```$")
-	if matches := re.FindStringSubmatch(input); len(matches) > 1 {
-		input = strings.TrimSpace(matches[1])
+	// 使用字符串分割移除 markdown 代码块（避免 ReDoS）
+	// 检查是否以 ``` 开头
+	if strings.HasPrefix(input, "```") {
+		lines := strings.Split(input, "\n")
+		if len(lines) > 2 {
+			// 移除第一行（```json 或 ```）和最后一行（```）
+			input = strings.Join(lines[1:len(lines)-1], "\n")
+			input = strings.TrimSpace(input)
+		}
 	}
 
 	// 尝试直接解析

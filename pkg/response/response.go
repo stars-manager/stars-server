@@ -16,6 +16,7 @@ const (
 	CodeBadRequest   Code = 1001
 	CodeInvalidParam Code = 1002
 	CodeInvalidJSON  Code = 1003
+	CodeUnauthorized Code = 1004
 
 	// 服务错误 2xxx
 	CodeInternalError  Code = 2001
@@ -29,6 +30,7 @@ var CodeMsg = map[Code]string{
 	CodeBadRequest:     "请求格式错误",
 	CodeInvalidParam:   "参数校验失败",
 	CodeInvalidJSON:    "JSON解析失败",
+	CodeUnauthorized:   "未授权",
 	CodeInternalError:  "服务器内部错误",
 	CodeLLMError:       "LLM调用失败",
 	CodeSessionTooLong: "会话历史过长，请开启新会话",
@@ -88,9 +90,12 @@ func Error(w http.ResponseWriter, code Code, message ...string) {
 		msg = message[0]
 	}
 
-	statusCode := http.StatusBadRequest
-	if code >= 2000 {
-		statusCode = http.StatusInternalServerError
+	statusCode := http.StatusBadRequest // 默认 400
+	switch {
+	case code == CodeUnauthorized:
+		statusCode = http.StatusUnauthorized // 401
+	case code >= 2000:
+		statusCode = http.StatusInternalServerError // 500
 	}
 
 	respondJSON(w, statusCode, Response{
