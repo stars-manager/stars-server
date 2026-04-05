@@ -1,20 +1,97 @@
-# .cnb.yml
+# ============================================
+# Cloud Native Build 配置文件
+# ============================================
+# 当代码推送到 GitHub 时，自动触发构建和部署
+# 
+# 工作流程：
+# 1. 推送代码到 dev 分支 → 构建 :dev 标签镜像
+# 2. 推送代码到 main 分支 → 构建 :latest 标签镜像
+# 3. 同时构建版本标签镜像（如 :v1.0.0）
+#
+# 环境变量说明：
+# - CNB_DOCKER_REGISTRY: Docker 镜像仓库地址（自动注入）
+# - CNB_REPO_SLUG_LOWERCASE: 项目路径（自动注入）
+# ============================================
+
+# ============================================
+# dev 分支配置（开发环境）
+# ============================================
 dev:
   push:
     - services:
-        - docker
+        - docker  # 使用 Docker 服务
       stages:
-        - name: docker build
-          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev .
-        - name: docker push
-          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev
+        # 阶段0：运行测试（可选，确保代码质量）
+        - name: run tests
+          script: |
+            go mod download
+            go test -v ./...
+        
+        # 阶段1：构建镜像
+        - name: docker build (dev)
+          script: |
+            # 获取版本信息
+            VERSION=$(git describe --tags --always --dirty)
+            GIT_COMMIT=$(git rev-parse --short HEAD)
+            BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            
+            # 构建镜像并注入版本信息
+            # 使用 BuildKit 优化构建速度
+            DOCKER_BUILDKIT=1 docker build \
+              --build-arg VERSION=${VERSION} \
+              --build-arg GIT_COMMIT=${GIT_COMMIT} \
+              --build-arg BUILD_TIME=${BUILD_TIME} \
+              --cache-from ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} \
+              .
+        
+        # 阶段2：推送镜像到仓库
+        - name: docker push (dev)
+          script: |
+            # 推送 dev 标签
+            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev
+            # 推送版本标签（便于回滚）
+            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
 
+# ============================================
+# main 分支配置（生产环境）
+# ============================================
 main:
   push:
     - services:
-        - docker
+        - docker  # 使用 Docker 服务
       stages:
-        - name: docker build
-          script: docker build -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest .
-        - name: docker push
-          script: docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+        # 阶段0：运行测试（生产环境必须通过测试）
+        - name: run tests
+          script: |
+            go mod download
+            go test -v -race -coverprofile=coverage.txt ./...
+        
+        # 阶段1：构建镜像
+        - name: docker build (production)
+          script: |
+            # 获取版本信息
+            # 注意：生产版本不包含 dirty 标记
+            VERSION=$(git describe --tags --always)
+            GIT_COMMIT=$(git rev-parse --short HEAD)
+            BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            
+            # 构建镜像并注入版本信息
+            # 使用 BuildKit 优化构建速度，启用缓存
+            DOCKER_BUILDKIT=1 docker build \
+              --build-arg VERSION=${VERSION} \
+              --build-arg GIT_COMMIT=${GIT_COMMIT} \
+              --build-arg BUILD_TIME=${BUILD_TIME} \
+              --cache-from ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest \
+              -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} \
+              .
+        
+        # 阶段2：推送镜像到仓库
+        - name: docker push (production)
+          script: |
+            # 推送 latest 标签（稳定版本）
+            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
+            # 推送版本标签（便于版本追踪和回滚）
+            docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}

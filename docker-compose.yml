@@ -1,8 +1,52 @@
+# Docker Compose 配置文件
+# 用于本地开发和测试环境的一键部署
+
 services:
-  hunyuan-api:
-    build: .
+  stars-server:
+    # 构建配置
+    build: .                    # 使用当前目录的 Dockerfile 构建
+    image: stars-server:latest  # 镜像名称和标签
+    
+    # 重启策略：除非手动停止，否则自动重启
     restart: unless-stopped
+    
+    # 端口映射：主机端口:容器端口
     ports:
       - "8080:8080"
+    
+    # 环境变量配置
     env_file:
-      - .env
+      - .env                    # 从 .env 文件加载环境变量
+    environment:
+      - GIN_MODE=release        # Gin 框架生产模式（减少调试日志）
+    
+    # 资源限制（可选，防止资源耗尽）
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'           # 最多使用 1 个 CPU 核心
+          memory: 512M          # 最大内存 512MB
+        reservations:
+          cpus: '0.25'          # 预留 0.25 个 CPU 核心
+          memory: 128M          # 预留内存 128MB
+    
+    # 日志配置（防止日志文件过大）
+    logging:
+      driver: "json-file"       # 使用 JSON 文件日志驱动
+      options:
+        max-size: "10m"         # 单个日志文件最大 10MB
+        max-file: "3"           # 保留最多 3 个日志文件
+    
+    # 健康检查配置
+    healthcheck:
+      # 检查命令：访问健康检查端点
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s      # 检查间隔：每 30 秒检查一次
+      timeout: 10s       # 超时时间：单个检查最多等待 10 秒
+      retries: 3         # 重试次数：连续失败 3 次才标记为不健康
+      start_period: 40s  # 启动缓冲：容器启动后 40 秒才开始健康检查
+    
+    # 安全配置
+    security_opt:
+      - no-new-privileges:true  # 禁止提升权限
+    read_only: false            # 文件系统是否只读（暂不启用）
