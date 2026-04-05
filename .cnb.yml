@@ -24,19 +24,25 @@ dev:
         # 阶段0：运行测试（可选，确保代码质量）
         - name: run tests
           script: |
+            set -e  # 遇到错误立即退出
             go mod download
             go test -v ./...
-        
-        # 阶段1：构建镜像
-        - name: docker build (dev)
+
+        # 阶段1：构建和推送镜像（合并为一个阶段，确保变量可用）
+        - name: build and push
           script: |
+            set -e  # 遇到错误立即退出
+
             # 获取版本信息
             VERSION=$(git describe --tags --always --dirty)
             GIT_COMMIT=$(git rev-parse --short HEAD)
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            
-            # 构建镜像并注入版本信息
-            # 使用 BuildKit 优化构建速度
+
+            echo "Building version: ${VERSION}"
+            echo "Git commit: ${GIT_COMMIT}"
+            echo "Build time: ${BUILD_TIME}"
+
+            # 构建镜像（启用 BuildKit 缓存）
             DOCKER_BUILDKIT=1 docker build \
               --build-arg VERSION=${VERSION} \
               --build-arg GIT_COMMIT=${GIT_COMMIT} \
@@ -45,14 +51,33 @@ dev:
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev \
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} \
               .
-        
-        # 阶段2：推送镜像到仓库
-        - name: docker push (dev)
-          script: |
-            # 推送 dev 标签
+
+            # 推送镜像
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev
-            # 推送版本标签（便于回滚）
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+
+            echo "✅ Build and push completed successfully"
+
+        # 阶段2：镜像安全扫描（开发环境）
+        - name: security scan
+          script: |
+            set -e
+
+            VERSION=$(git describe --tags --always --dirty)
+
+            echo "🔍 Running security scan with Trivy..."
+
+            # 安装 Trivy
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.49.0
+
+            # 扫描镜像漏洞
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --exit-code 1 \
+              --ignore-unfixed \
+              ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+
+            echo "✅ Security scan passed"
 
 # ============================================
 # main 分支配置（生产环境）
@@ -65,20 +90,25 @@ main:
         # 阶段0：运行测试（生产环境必须通过测试）
         - name: run tests
           script: |
+            set -e  # 遇到错误立即退出
             go mod download
             go test -v -race -coverprofile=coverage.txt ./...
-        
-        # 阶段1：构建镜像
-        - name: docker build (production)
+
+        # 阶段1：构建和推送镜像（合并为一个阶段，确保变量可用）
+        - name: build and push
           script: |
+            set -e  # 遇到错误立即退出
+
             # 获取版本信息
-            # 注意：生产版本不包含 dirty 标记
             VERSION=$(git describe --tags --always)
             GIT_COMMIT=$(git rev-parse --short HEAD)
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-            
-            # 构建镜像并注入版本信息
-            # 使用 BuildKit 优化构建速度，启用缓存
+
+            echo "Building version: ${VERSION}"
+            echo "Git commit: ${GIT_COMMIT}"
+            echo "Build time: ${BUILD_TIME}"
+
+            # 构建镜像（启用 BuildKit 缓存）
             DOCKER_BUILDKIT=1 docker build \
               --build-arg VERSION=${VERSION} \
               --build-arg GIT_COMMIT=${GIT_COMMIT} \
@@ -87,11 +117,38 @@ main:
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest \
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} \
               .
-        
-        # 阶段2：推送镜像到仓库
-        - name: docker push (production)
-          script: |
-            # 推送 latest 标签（稳定版本）
+
+            # 推送镜像
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
-            # 推送版本标签（便于版本追踪和回滚）
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+
+            echo "✅ Build and push completed successfully"
+
+        # 阶段2：镜像安全扫描（生产环境，更严格）
+        - name: security scan
+          script: |
+            set -e
+
+            VERSION=$(git describe --tags --always)
+
+            echo "🔍 Running security scan with Trivy..."
+
+            # 安装 Trivy
+            curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.49.0
+
+            # 扫描镜像漏洞（生产环境扫描所有级别）
+            trivy image \
+              --severity HIGH,CRITICAL \
+              --exit-code 1 \
+              --ignore-unfixed \
+              --vuln-type os,library \
+              ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+
+            # 生成 SARIF 报告（可选，用于 CI 集成）
+            trivy image \
+              --format sarif \
+              --output trivy-results.sarif \
+              ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+
+            echo "✅ Security scan passed"
+            echo "📊 SARIF report saved to trivy-results.sarif"

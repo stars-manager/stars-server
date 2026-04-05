@@ -6,21 +6,22 @@ services:
     # 构建配置
     build: .                    # 使用当前目录的 Dockerfile 构建
     image: stars-server:latest  # 镜像名称和标签
-    
+    container_name: stars-server  # 明确的容器名称
+
     # 重启策略：除非手动停止，否则自动重启
     restart: unless-stopped
-    
+
     # 端口映射：主机端口:容器端口
     ports:
       - "8080:8080"
-    
+
     # 环境变量配置
     env_file:
       - .env                    # 从 .env 文件加载环境变量
     environment:
       - GIN_MODE=release        # Gin 框架生产模式（减少调试日志）
-    
-    # 资源限制（可选，防止资源耗尽）
+
+    # 资源限制（防止资源耗尽）
     deploy:
       resources:
         limits:
@@ -29,14 +30,14 @@ services:
         reservations:
           cpus: '0.25'          # 预留 0.25 个 CPU 核心
           memory: 128M          # 预留内存 128MB
-    
+
     # 日志配置（防止日志文件过大）
     logging:
       driver: "json-file"       # 使用 JSON 文件日志驱动
       options:
         max-size: "10m"         # 单个日志文件最大 10MB
         max-file: "3"           # 保留最多 3 个日志文件
-    
+
     # 健康检查配置
     healthcheck:
       # 检查命令：访问健康检查端点
@@ -45,8 +46,30 @@ services:
       timeout: 10s       # 超时时间：单个检查最多等待 10 秒
       retries: 3         # 重试次数：连续失败 3 次才标记为不健康
       start_period: 40s  # 启动缓冲：容器启动后 40 秒才开始健康检查
-    
-    # 安全配置
+
+    # 安全配置（强化）
     security_opt:
       - no-new-privileges:true  # 禁止提升权限
-    read_only: false            # 文件系统是否只读（暂不启用）
+    read_only: true             # 启用只读文件系统（安全最佳实践）
+    tmpfs:
+      - /tmp                    # 临时文件目录（可写）
+      - /tmp/app:size=10M       # 应用临时目录，限制大小
+
+    # 网络配置（隔离）
+    networks:
+      - stars-network
+
+    # 资源监控标签（用于 Prometheus 等监控系统）
+    labels:
+      - "prometheus.io/scrape=true"
+      - "prometheus.io/port=8080"
+      - "prometheus.io/path=/metrics"
+
+# 自定义网络（隔离和安全性）
+networks:
+  stars-network:
+    driver: bridge
+    name: stars-network
+    labels:
+      - "environment=production"
+      - "app=stars-server"

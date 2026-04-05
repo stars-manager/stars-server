@@ -1,7 +1,9 @@
 # ============================================
 # 多阶段构建 - 第一阶段：构建
 # ============================================
-FROM golang:1.21-alpine AS builder
+# 使用明确的版本标签，避免 latest 的不可预测性
+# golang:1.22-alpine3.19 是当前稳定版本
+FROM golang:1.22-alpine3.19 AS builder
 
 # 安装构建依赖
 # git: 用于获取版本信息
@@ -9,6 +11,9 @@ RUN apk add --no-cache git
 
 # 设置工作目录
 WORKDIR /app
+
+# 安装 SBOM 生成工具（syft）
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.0.0
 
 # ============================================
 # 依赖层（利用 Docker 缓存）
@@ -38,22 +43,39 @@ RUN CGO_ENABLED=0 go build \
               -X server/pkg/version.BuildTime=${BUILD_TIME}" \
     -o server ./cmd/server
 
+# 生成 SBOM（软件物料清单）
+# 提升供应链安全，便于漏洞追踪
+RUN syft /app -o spdx-json=/app/sbom.spdx.json
+
 # ============================================
 # 多阶段构建 - 第二阶段：运行
 # ============================================
-FROM alpine:latest
+# 使用明确的版本标签
+FROM alpine:3.19
 
 # 安装运行时依赖
 # ca-certificates: HTTPS 连接所需的 CA 证书
 # wget: 用于健康检查
 RUN apk --no-cache add ca-certificates wget
 
+# 创建非 root 用户和组（安全最佳实践）
+RUN addgroup -g 1000 -S appgroup && \
+    adduser -u 1000 -S appuser -G appgroup
+
 # 设置工作目录
 WORKDIR /app
 
-# 从构建阶段复制二进制文件
+# 从构建阶段复制二进制文件和 SBOM
 # 只复制必要的文件，减小镜像体积
-COPY --from=builder /app/server /app/server
+COPY --from=builder --chown=appuser:appgroup /app/server /app/server
+COPY --from=builder --chown=appuser:appgroup /app/sbom.spdx.json /app/sbom.spdx.json
+
+# 创建临时目录并设置权限（用于只读文件系统）
+RUN mkdir -p /tmp/app && \
+    chown -R appuser:appgroup /tmp/app
+
+# 切换到非 root 用户
+USER appuser
 
 # 暴露端口
 # 声明容器监听的端口（仅文档作用）

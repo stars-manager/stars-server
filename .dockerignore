@@ -1,59 +1,64 @@
+# ============================================
 # Docker 构建忽略文件
-# 减少 Docker 构建上下文，加快构建速度
+# ============================================
+# 排除不需要复制到镜像的文件，提升构建性能和安全性
 
 # Git 相关
 .git
 .gitignore
 .gitattributes
 
-# 文档和说明
+# CI/CD 配置
+.cnb.yml
+.github
+.gitlab-ci.yml
+.travis.yml
+
+# Docker 相关
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 文档
 *.md
 LICENSE
 SECURITY.md
+CONTRIBUTING.md
 
-# CI/CD 配置
-.cnb.yml
-.travis.yml
-.gitlab-ci.yml
-
-# 开发工具配置
-.vscode
-.idea
-*.swp
-*.swo
-*~
-
-# 构建产物
-build/
-dist/
-bin/
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-
-# 测试相关
+# 测试文件
 *_test.go
 testdata/
 coverage.txt
 *.test
+
+# 配置文件（敏感信息）
+.env
+.env.*
+*.sample
+*.example
 
 # 临时文件
 tmp/
 temp/
 *.tmp
 *.log
+*.swp
+*.swo
+*~
 
-# 环境配置（敏感信息）
-.env
-.env.*
-!.env.example
+# IDE 配置
+.vscode/
+.idea/
+*.iml
+.DS_Store
 
-# Docker 相关（避免递归）
-Dockerfile*
-docker-compose*.yml
-.docker
+# 构建产物（由 Go 自动生成）
+bin/
+dist/
 
-# 依赖目录（Go 模块会重新下载）
+# 依赖目录（Go modules 会自动下载）
 vendor/
+
+# 其他不需要的文件
+Makefile
+scripts/
