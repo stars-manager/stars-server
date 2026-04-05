@@ -1,0 +1,132 @@
+# ============================================
+# GolangCI-Lint 配置文件
+# ============================================
+# 生产级代码检查配置，确保代码质量
+
+run:
+  # 超时时间
+  timeout: 5m
+
+  # 检查的目录
+  dirs:
+    - cmd
+    - pkg
+    - internal
+
+  # 跳过的目录
+  skip-dirs:
+    - vendor
+    - testdata
+    - examples
+
+  # 构建标签
+  build-tags:
+    - integration
+
+# 启用的检查器
+linters:
+  enable:
+    # 默认检查器
+    - errcheck      # 检查错误返回值
+    - gosimple      # 代码简化建议
+    - govet         # Go vet 检查
+    - ineffassign   # 检测无效赋值
+    - staticcheck   # 静态分析
+    - unused        # 未使用的代码
+
+    # 额外检查器（生产环境推荐）
+    - bodyclose     # 检查 HTTP response body 是否关闭
+    - dupl          # 检查重复代码
+    - exportloopref # 检查循环变量引用
+    - gochecknoinits # 检查 init 函数使用
+    - goconst       # 检查可以替换为常量的重复字符串
+    - gocritic      # 代码风格检查
+    - gocyclo       # 圈复杂度检查
+    - godot         # 检查注释格式
+    - gofmt         # 代码格式检查
+    - goimports     # 导入排序检查
+    - goprintffuncname # printf 函数命名检查
+    - gosec         # 安全检查
+    - misspell      # 拼写检查
+    - nakedret      # 检查裸返回
+    - noctx         # 检查 HTTP 请求是否携带 context
+    - prealloc      # 检查预分配优化
+    - rowserrcheck  # 检查 sql.Rows.Err 是否检查
+    - sqlclosecheck # 检查 sql.Rows 是否关闭
+    - stylecheck    # 样式检查
+    - unconvert     # 检查不必要的类型转换
+    - unparam       # 检查未使用的参数
+    - whitespace    # 空白符检查
+
+  # 禁用的检查器
+  disable:
+    - exhaustivestruct # 过于严格
+    - funlen            # 函数长度限制（可自定义）
+    - gomnd             # 魔法数字检查（可自定义）
+    - lll               # 行长度限制（可自定义）
+    - wsl               # 空白行风格（个人偏好）
+
+# 检查器配置
+linters-settings:
+  # 圈复杂度
+  gocyclo:
+    min-complexity: 15  # 最大复杂度 15
+
+  # 函数长度
+  funlen:
+    lines: 100          # 最大行数
+    statements: 50      # 最大语句数
+
+  # 行长度
+  lll:
+    line-length: 120    # 最大行长度
+
+  # 重复代码
+  dupl:
+    threshold: 100      # 最小重复长度
+
+  # 安全检查
+  gosec:
+    excludes:
+      - G104  # 忽略未检查的错误（已由 errcheck 覆盖）
+      - G304  # 忽略文件路径变量（配置文件常见）
+
+  # Go 常量
+  goconst:
+    min-len: 3          # 最小字符串长度
+    min-occurrences: 3  # 最小出现次数
+
+  # 未使用的参数
+  unparam:
+    check-exported: false  # 不检查导出函数
+
+# 问题配置
+issues:
+  # 排除的规则
+  exclude-rules:
+    # 测试文件放宽检查
+    - path: _test\.go
+      linters:
+        - dupl
+        - gosec
+        - goconst
+
+    # 生成的代码放宽检查
+    - path: \.pb\.go
+      linters:
+        - all
+
+  # 最大问题数量
+  max-issues-per-linter: 0  # 0 表示不限制
+  max-same-issues: 0        # 0 表示不限制
+
+  # 显示所有问题
+  new: false
+
+# 输出配置
+output:
+  # 输出格式
+  format: colored-line-number
+
+  # 打印检查器名称
+  print-linter-name: true

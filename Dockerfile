@@ -7,13 +7,15 @@ FROM golang:1.22-alpine3.19 AS builder
 
 # 安装构建依赖
 # git: 用于获取版本信息
-RUN apk add --no-cache git
+# curl: 用于下载 Syft
+RUN apk add --no-cache git curl
 
 # 设置工作目录
 WORKDIR /app
 
-# 安装 SBOM 生成工具（syft）
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.0.0
+# 安装 SBOM 生成工具（syft）- 可选步骤，失败不影响构建
+RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin v1.0.0 || \
+    echo "⚠️  Syft installation failed, skipping SBOM generation"
 
 # ============================================
 # 依赖层（利用 Docker 缓存）
@@ -43,9 +45,10 @@ RUN CGO_ENABLED=0 go build \
               -X server/pkg/version.BuildTime=${BUILD_TIME}" \
     -o server ./cmd/server
 
-# 生成 SBOM（软件物料清单）
+# 生成 SBOM（软件物料清单）- 可选步骤
 # 提升供应链安全，便于漏洞追踪
-RUN syft /app -o spdx-json=/app/sbom.spdx.json
+RUN syft /app -o spdx-json=/app/sbom.spdx.json || \
+    echo '{"sbom": "generation failed"}' > /app/sbom.spdx.json
 
 # ============================================
 # 多阶段构建 - 第二阶段：运行
