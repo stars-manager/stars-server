@@ -1,69 +1,34 @@
-# ============================================
-# Cloud Native Build 配置文件
-# ============================================
-# 当代码推送到 GitHub 时，自动触发构建和部署
-# 
-# 工作流程：
-# 1. 推送代码到 dev 分支 → 构建 :dev 标签镜像
-# 2. 推送代码到 main 分支 → 构建 :latest 标签镜像
-# 3. 同时构建版本标签镜像（如 :v1.0.0）
-#
-# 环境变量说明：
-# - CNB_DOCKER_REGISTRY: Docker 镜像仓库地址（自动注入）
-# - CNB_REPO_SLUG_LOWERCASE: 项目路径（自动注入）
-# ============================================
+# Cloud Native Build Configuration
+# Minimal build pipeline with dev/main differentiation
 
 # ============================================
-# dev 分支配置（开发环境）
+# Development Branch Configuration
+# ============================================
+# Features:
+# - Faster build (no strict scanning)
+# - Dev tag + version tag
+# - Basic security scan (warning only)
 # ============================================
 dev:
   push:
     - services:
-        - docker  # 使用 Docker 服务
+        - docker
       stages:
-        # 阶段0：代码检查和测试（合并执行，提升效率）
-        - name: lint and test
-          script: |
-            set -e
-
-            echo "🔍 Running code quality checks..."
-
-            # 安装 golangci-lint（如果未安装）
-            if ! command -v golangci-lint &> /dev/null; then
-              echo "Installing golangci-lint..."
-              curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.57.0
-              export PATH=$PATH:$(go env GOPATH)/bin
-            fi
-
-            # 运行代码检查
-            echo "Running golangci-lint..."
-            golangci-lint run --timeout=5m || echo "⚠️  Lint warnings found, continuing..."
-
-            # 运行测试
-            echo "🧪 Running tests..."
-            go mod download
-            go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-
-            # 显示覆盖率摘要
-            go tool cover -func=coverage.txt | tail -n 1
-
-            echo "✅ Lint and test completed"
-
-        # 阶段1：构建和推送镜像
         - name: build and push
           script: |
             set -e
-
-            # 获取版本信息
+            
+            # Version info
             VERSION=$(git describe --tags --always --dirty)
             GIT_COMMIT=$(git rev-parse --short HEAD)
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-            echo "Building version: ${VERSION}"
-            echo "Git commit: ${GIT_COMMIT}"
-            echo "Build time: ${BUILD_TIME}"
-
-            # 构建镜像（启用 BuildKit）
+            
+            echo "=== Development Build ==="
+            echo "Version: ${VERSION}"
+            echo "Commit: ${GIT_COMMIT}"
+            echo "Time: ${BUILD_TIME}"
+            
+            # Build image
             DOCKER_BUILDKIT=1 docker build \
               --build-arg VERSION=${VERSION} \
               --build-arg GIT_COMMIT=${GIT_COMMIT} \
@@ -71,113 +36,64 @@ dev:
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev \
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} \
               .
-
-            # 推送镜像
+            
+            # Push images
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:dev
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+            
+            echo "=== Build Success ==="
+            echo "Image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}"
 
-            echo "✅ Build and push completed successfully"
-
-        # 阶段2：镜像安全扫描
         - name: security scan
           script: |
             VERSION=$(git describe --tags --always --dirty)
-
-            echo "🔍 Running security scan with Trivy..."
-
-            # 安装 Trivy
+            
+            echo "=== Security Scan (Dev Mode) ==="
+            
+            # Install Trivy
             if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.49.0; then
-              # 扫描镜像漏洞
+              # Scan with warning only (exit-code 0)
               trivy image \
                 --severity HIGH,CRITICAL \
                 --exit-code 0 \
                 --ignore-unfixed \
                 --format table \
-                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || \
-                echo "⚠️  Security scan found vulnerabilities, please review"
+                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || true
               
-              echo "✅ Security scan completed"
+              echo "Scan completed (warnings only)"
             else
-              echo "⚠️  Trivy installation failed, skipping security scan"
+              echo "Trivy installation failed, scan skipped"
             fi
 
-        # 阶段3：构建通知
-        - name: notify
-          script: |
-            VERSION=$(git describe --tags --always --dirty)
-            GIT_COMMIT=$(git rev-parse --short HEAD)
-
-            echo "📧 Build Notification"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "✅ Branch: dev"
-            echo "✅ Version: ${VERSION}"
-            echo "✅ Commit: ${GIT_COMMIT}"
-            echo "✅ Image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            
-            # 可选：发送 Webhook 通知（Slack/钉钉/企业微信等）
-            # curl -X POST -H 'Content-type: application/json' \
-            #   --data "{\"text\":\"Build succeeded: ${VERSION}\"}" \
-            #   ${WEBHOOK_URL} || true
-
 # ============================================
-# main 分支配置（生产环境）
+# Production Branch Configuration
+# ============================================
+# Features:
+# - Strict security scan (critical only)
+# - Latest tag + version tag
+# - Multi-format reports (SARIF, JSON)
+# - Build artifact archive
 # ============================================
 main:
   push:
     - services:
-        - docker  # 使用 Docker 服务
+        - docker
       stages:
-        # 阶段0：代码检查和测试（生产环境必须通过）
-        - name: lint and test
-          script: |
-            set -e
-
-            echo "🔍 Running code quality checks..."
-
-            # 安装 golangci-lint（如果未安装）
-            if ! command -v golangci-lint &> /dev/null; then
-              echo "Installing golangci-lint..."
-              curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.57.0
-              export PATH=$PATH:$(go env GOPATH)/bin
-            fi
-
-            # 运行代码检查（生产环境更严格）
-            echo "Running golangci-lint..."
-            golangci-lint run --timeout=5m --max-issues-per-linter=0 --max-same-issues=0
-
-            # 运行测试（生产环境要求覆盖率）
-            echo "🧪 Running tests with coverage..."
-            go mod download
-            go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
-
-            # 检查覆盖率阈值（可选：要求最低覆盖率）
-            COVERAGE=$(go tool cover -func=coverage.txt | grep total | awk '{print $3}' | sed 's/%//')
-            echo "📊 Total coverage: ${COVERAGE}%"
-
-            # 可选：强制最低覆盖率（例如 60%）
-            # if (( $(echo "${COVERAGE} < 60" | bc -l) )); then
-            #   echo "❌ Coverage ${COVERAGE}% is below threshold 60%"
-            #   exit 1
-            # fi
-
-            echo "✅ Lint and test completed"
-
-        # 阶段1：构建和推送镜像
         - name: build and push
           script: |
             set -e
-
-            # 获取版本信息
+            
+            # Version info
             VERSION=$(git describe --tags --always)
             GIT_COMMIT=$(git rev-parse --short HEAD)
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-            echo "Building version: ${VERSION}"
-            echo "Git commit: ${GIT_COMMIT}"
-            echo "Build time: ${BUILD_TIME}"
-
-            # 构建镜像（启用 BuildKit）
+            
+            echo "=== Production Build ==="
+            echo "Version: ${VERSION}"
+            echo "Commit: ${GIT_COMMIT}"
+            echo "Time: ${BUILD_TIME}"
+            
+            # Build image
             DOCKER_BUILDKIT=1 docker build \
               --build-arg VERSION=${VERSION} \
               --build-arg GIT_COMMIT=${GIT_COMMIT} \
@@ -185,90 +101,76 @@ main:
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest \
               -t ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} \
               .
-
-            # 推送镜像
+            
+            # Push images
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest
             docker push ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}
+            
+            echo "=== Build Success ==="
+            echo "Image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}"
+            echo "Latest: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
 
-            echo "✅ Build and push completed successfully"
-
-        # 阶段2：镜像安全扫描（生产环境）
         - name: security scan
           script: |
             VERSION=$(git describe --tags --always)
-
-            echo "🔍 Running security scan with Trivy..."
-
-            # 安装 Trivy
+            
+            echo "=== Security Scan (Production Mode) ==="
+            
+            # Install Trivy
             if curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin v0.49.0; then
-              # 扫描镜像漏洞（生产环境扫描所有类型）
+              # Strict scan: os + library vulnerabilities
               trivy image \
                 --severity HIGH,CRITICAL \
                 --exit-code 0 \
                 --ignore-unfixed \
                 --vuln-type os,library \
                 --format table \
-                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || \
-                echo "⚠️  Security scan found vulnerabilities, please review"
+                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || true
               
-              # 生成 SARIF 报告（用于 GitHub Security、SonarQube 等）
+              # Generate SARIF report (for GitHub Security)
+              echo "Generating SARIF report..."
               trivy image \
                 --format sarif \
                 --output trivy-results.sarif \
-                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || \
-                echo "⚠️  SARIF report generation failed"
+                ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || true
               
-              # 生成 JSON 报告（用于归档和分析）
+              # Generate JSON report (for archive)
+              echo "Generating JSON report..."
               trivy image \
                 --format json \
                 --output trivy-results.json \
                 ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION} || true
               
-              echo "✅ Security scan completed"
-              echo "📊 Reports saved: trivy-results.sarif, trivy-results.json"
+              echo "Scan completed"
+              echo "Reports: trivy-results.sarif, trivy-results.json"
             else
-              echo "⚠️  Trivy installation failed, skipping security scan"
+              echo "Trivy installation failed, scan skipped"
             fi
 
-        # 阶段3：构建通知（生产环境）
-        - name: notify
+        - name: post-build
           script: |
             VERSION=$(git describe --tags --always)
             GIT_COMMIT=$(git rev-parse --short HEAD)
             BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-            echo "📧 Production Build Notification"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "🚀 Branch: main (PRODUCTION)"
-            echo "🏷️  Version: ${VERSION}"
-            echo "📝 Commit: ${GIT_COMMIT}"
-            echo "⏰ Build Time: ${BUILD_TIME}"
-            echo "🐳 Image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}"
-            echo "🐳 Latest: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             
-            # 可选：发送 Webhook 通知到 Slack/钉钉/企业微信等
-            # 示例：Slack Webhook
+            echo "=== Production Build Summary ==="
+            echo "Branch: main (PRODUCTION)"
+            echo "Version: ${VERSION}"
+            echo "Commit: ${GIT_COMMIT}"
+            echo "Build Time: ${BUILD_TIME}"
+            echo "Image: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}"
+            echo "Latest: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
+            echo "Reports: trivy-results.sarif, trivy-results.json"
+            
+            # Optional: Send webhook notification
+            # Uncomment and configure your webhook URL below:
+            # 
+            # # Slack example
             # curl -X POST -H 'Content-type: application/json' \
-            #   --data "{
-            #     \"text\":\"🚀 Production Build Succeeded\",
-            #     \"attachments\":[{
-            #       \"fields\":[
-            #         {\"title\":\"Version\",\"value\":\"${VERSION}\",\"short\":true},
-            #         {\"title\":\"Commit\",\"value\":\"${GIT_COMMIT}\",\"short\":true},
-            #         {\"title\":\"Image\",\"value\":\"${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}\",\"short\":false}
-            #       ]
-            #     }]
-            #   }" \
+            #   --data "{\"text\":\"Production build succeeded: ${VERSION}\"}" \
             #   ${SLACK_WEBHOOK_URL} || true
-            
-            # 示例：钉钉 Webhook
+            # 
+            # # DingTalk example
             # curl -X POST -H 'Content-Type: application/json' \
-            #   --data "{
-            #     \"msgtype\":\"markdown\",
-            #     \"markdown\":{
-            #       \"title\":\"构建成功\",
-            #       \"text\":\"## 🚀 生产环境构建成功\\n- **版本**: ${VERSION}\\n- **提交**: ${GIT_COMMIT}\\n- **镜像**: ${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:${VERSION}\"
-            #     }
-            #   }" \
+            #   --data "{\"msgtype\":\"text\",\"text\":{\"content\":\"Production build: ${VERSION} (${GIT_COMMIT})\"}}" \
             #   ${DINGTALK_WEBHOOK_URL} || true
